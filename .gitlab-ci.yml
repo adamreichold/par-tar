@@ -1,0 +1,12 @@
+build:
+  image: rust:alpine
+  variables:
+    RUSTFLAGS: "-Ctarget-feature=+crt-static"
+  before_script:
+    - apk add musl-dev
+  script:
+    - cargo build --release
+    - strip --strip-all target/release/par-tar
+  artifacts:
+    paths:
+      - target/release/par-tar
