@@ -20,11 +20,18 @@ fn main() -> Fallible {
                 .long("jobs")
                 .default_value("1"),
         )
+        .arg(
+            Arg::with_name("LEVEL")
+            .short("l")
+            .long("level")
+            .default_value("0")
+        )
         .get_matches();
 
     let output = matches.value_of("OUTPUT").unwrap();
     let inputs = matches.values_of("INPUTS").unwrap();
     let jobs = matches.value_of("JOBS").unwrap().parse::<usize>()?;
+    let level = matches.value_of("LEVEL").unwrap().parse::<i32>()?;
 
     let (inputs_sender, inputs_receiver) = unbounded();
     let (buffers_sender, buffers_receiver) = bounded(jobs);
@@ -61,7 +68,7 @@ fn main() -> Fallible {
         })
     }));
 
-    let mut builder = Builder::new(Encoder::new(File::create(output)?, 0)?);
+    let mut builder = Builder::new(Encoder::new(File::create(output)?, level)?);
 
     for (path, buffer) in buffers_receiver {
         eprintln!("{}", path.display());
