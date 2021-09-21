@@ -8,5 +8,6 @@ resolver = "2"
 clap = "2.33"
 crossbeam-channel = "0.5"
 glob = "0.3"
+rayon = "1.5"
 tar = "0.4"
 zstd = { version = "0.9", default-features = false, features = ["zstdmt", "thin"] }

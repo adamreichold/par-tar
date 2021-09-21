@@ -1,10 +1,15 @@
 use std::error::Error;
 use std::fs::{read, File};
+use std::path::PathBuf;
 use std::thread::spawn;
 
 use clap::{crate_authors, crate_name, crate_version, App, Arg};
-use crossbeam_channel::{bounded, unbounded};
+use crossbeam_channel::{bounded, Sender};
 use glob::glob;
+use rayon::{
+    iter::{IntoParallelIterator, ParallelBridge, ParallelIterator},
+    ThreadPoolBuilder,
+};
 use tar::{Builder, Header};
 use zstd::Encoder;
 
@@ -21,78 +26,68 @@ fn main() -> Fallible {
                 .default_value("1"),
         )
         .arg(
-            Arg::with_name("WORKERS")
-                .short("w")
-                .long("workers")
-                .default_value("1"),
-        )
-        .arg(
             Arg::with_name("LEVEL")
                 .short("l")
                 .long("level")
                 .default_value("0"),
         )
+        .arg(
+            Arg::with_name("WORKERS")
+                .short("w")
+                .long("workers")
+                .default_value("1"),
+        )
         .get_matches();
 
     let output = matches.value_of("OUTPUT").unwrap();
-    let inputs = matches.values_of("INPUTS").unwrap();
-    let jobs = matches.value_of("JOBS").unwrap().parse::<usize>()?;
-    let workers = matches.value_of("WORKERS").unwrap().parse::<u32>()?;
-    let level = matches.value_of("LEVEL").unwrap().parse::<i32>()?;
+    let inputs = matches
+        .values_of("INPUTS")
+        .unwrap()
+        .map(|inputs| inputs.to_owned())
+        .collect::<Vec<_>>();
 
-    let (inputs_sender, inputs_receiver) = unbounded();
+    let jobs = matches.value_of("JOBS").unwrap().parse::<usize>()?;
+    let level = matches.value_of("LEVEL").unwrap().parse::<i32>()?;
+    let workers = matches.value_of("WORKERS").unwrap().parse::<u32>()?;
+
+    ThreadPoolBuilder::new().num_threads(jobs).build_global()?;
+
     let (buffers_sender, buffers_receiver) = bounded(jobs);
 
-    let mut jobs = (0..jobs)
-        .map(move |_| {
-            let inputs_receiver = inputs_receiver.clone();
-            let buffers_sender = buffers_sender.clone();
+    fn read_dir(buffers_sender: &Sender<(PathBuf, Vec<u8>)>, dir: PathBuf) -> Fallible {
+        dir.read_dir()?.par_bridge().try_for_each(|entry| {
+            let entry = entry?;
+            let path = entry.path();
 
-            spawn(move || -> Fallible {
-                for input in inputs_receiver {
-                    let buffer = read(&input)?;
+            if entry.file_type()?.is_dir() {
+                read_dir(buffers_sender, path)?;
+            } else {
+                let buffer = read(&path)?;
 
-                    buffers_sender.send((input, buffer)).unwrap();
+                buffers_sender.send((path, buffer)).unwrap();
+            }
+
+            Ok(())
+        })
+    }
+
+    let reader = spawn(move || -> Fallible {
+        inputs.into_par_iter().try_for_each(|inputs| {
+            glob(&inputs)?.par_bridge().try_for_each(|input| {
+                let path = input?;
+
+                if path.is_dir() {
+                    read_dir(&buffers_sender, path)?;
+                } else {
+                    let buffer = read(&path)?;
+
+                    buffers_sender.send((path, buffer)).unwrap();
                 }
 
                 Ok(())
             })
         })
-        .collect::<Vec<_>>();
-
-    jobs.extend(inputs.map(move |inputs| {
-        let inputs = inputs.to_owned();
-        let inputs_sender = inputs_sender.clone();
-
-        spawn(move || {
-            let mut dirs = Vec::new();
-
-            for input in glob(&inputs)? {
-                let input = input?;
-
-                if input.is_dir() {
-                    dirs.push(input);
-                } else {
-                    inputs_sender.send(input).unwrap();
-                }
-            }
-
-            while let Some(dir) = dirs.pop() {
-                for entry in dir.read_dir()? {
-                    let entry = entry?;
-                    let path = entry.path();
-
-                    if entry.file_type()?.is_dir() {
-                        dirs.push(path);
-                    } else {
-                        inputs_sender.send(path).unwrap();
-                    }
-                }
-            }
-
-            Ok(())
-        })
-    }));
+    });
 
     let mut encoder = Encoder::new(File::create(output)?, level)?;
     encoder.multithread(workers)?;
@@ -112,9 +107,7 @@ fn main() -> Fallible {
     let encoder = builder.into_inner()?;
     encoder.finish()?;
 
-    for job in jobs {
-        job.join().unwrap()?;
-    }
+    reader.join().unwrap()?;
 
     Ok(())
 }
