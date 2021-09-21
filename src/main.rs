@@ -65,10 +65,29 @@ fn main() -> Fallible {
         let inputs_sender = inputs_sender.clone();
 
         spawn(move || {
+            let mut dirs = Vec::new();
+
             for input in glob(&inputs)? {
                 let input = input?;
 
-                inputs_sender.send(input).unwrap();
+                if input.is_dir() {
+                    dirs.push(input);
+                } else {
+                    inputs_sender.send(input).unwrap();
+                }
+            }
+
+            while let Some(dir) = dirs.pop() {
+                for entry in dir.read_dir()? {
+                    let entry = entry?;
+                    let path = entry.path();
+
+                    if entry.file_type()?.is_dir() {
+                        dirs.push(path);
+                    } else {
+                        inputs_sender.send(path).unwrap();
+                    }
+                }
             }
 
             Ok(())
