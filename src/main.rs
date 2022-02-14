@@ -17,23 +17,18 @@ fn main() -> Fallible {
     let matches = App::new(crate_name!())
         .version(crate_version!())
         .author(crate_authors!(", "))
-        .arg(Arg::with_name("OUTPUT").required(true))
-        .arg(Arg::with_name("INPUTS").required(true).multiple(true))
+        .arg(Arg::new("OUTPUT").required(true))
+        .arg(Arg::new("INPUTS").required(true).multiple_values(true))
+        .arg(Arg::new("JOBS").short('j').long("jobs").default_value("1"))
         .arg(
-            Arg::with_name("JOBS")
-                .short("j")
-                .long("jobs")
-                .default_value("1"),
-        )
-        .arg(
-            Arg::with_name("LEVEL")
-                .short("l")
+            Arg::new("LEVEL")
+                .short('l')
                 .long("level")
                 .default_value("0"),
         )
         .arg(
-            Arg::with_name("WORKERS")
-                .short("w")
+            Arg::new("WORKERS")
+                .short('w')
                 .long("workers")
                 .default_value("1"),
         )
