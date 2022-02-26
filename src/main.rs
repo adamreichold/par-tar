@@ -3,7 +3,7 @@ use std::fs::{read, File};
 use std::path::PathBuf;
 use std::thread::spawn;
 
-use clap::{crate_authors, crate_name, crate_version, App, Arg};
+use clap::{crate_authors, crate_name, crate_version, Arg, Command};
 use crossbeam_channel::{bounded, Sender};
 use glob::glob;
 use rayon::{
@@ -14,7 +14,7 @@ use tar::{Builder, Header};
 use zstd::Encoder;
 
 fn main() -> Fallible {
-    let matches = App::new(crate_name!())
+    let matches = Command::new(crate_name!())
         .version(crate_version!())
         .author(crate_authors!(", "))
         .arg(Arg::new("OUTPUT").required(true))
