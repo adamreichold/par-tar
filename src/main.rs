@@ -1,5 +1,6 @@
 use std::error::Error;
-use std::fs::{read, File};
+use std::fs::{File, Metadata};
+use std::io::Read;
 use std::path::PathBuf;
 use std::thread::spawn;
 
@@ -49,7 +50,18 @@ fn main() -> Fallible {
 
     let (buffers_sender, buffers_receiver) = bounded(jobs);
 
-    fn read_dir(buffers_sender: &Sender<(PathBuf, Vec<u8>)>, dir: PathBuf) -> Fallible {
+    fn read_file(path: PathBuf) -> Fallible<(PathBuf, Metadata, Vec<u8>)> {
+        let mut file = File::open(&path)?;
+
+        let metadata = file.metadata()?;
+
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)?;
+
+        Ok((path, metadata, buffer))
+    }
+
+    fn read_dir(buffers_sender: &Sender<(PathBuf, Metadata, Vec<u8>)>, dir: PathBuf) -> Fallible {
         dir.read_dir()?.par_bridge().try_for_each(|entry| {
             let entry = entry?;
             let path = entry.path();
@@ -57,9 +69,8 @@ fn main() -> Fallible {
             if entry.file_type()?.is_dir() {
                 read_dir(buffers_sender, path)?;
             } else {
-                let buffer = read(&path)?;
-
-                buffers_sender.send((path, buffer)).unwrap();
+                let buffer = read_file(path)?;
+                buffers_sender.send(buffer).unwrap();
             }
 
             Ok(())
@@ -74,9 +85,8 @@ fn main() -> Fallible {
                 if path.is_dir() {
                     read_dir(&buffers_sender, path)?;
                 } else {
-                    let buffer = read(&path)?;
-
-                    buffers_sender.send((path, buffer)).unwrap();
+                    let buffer = read_file(path)?;
+                    buffers_sender.send(buffer).unwrap();
                 }
 
                 Ok(())
@@ -88,15 +98,12 @@ fn main() -> Fallible {
     encoder.multithread(workers)?;
     let mut builder = Builder::new(encoder);
 
-    for (path, buffer) in buffers_receiver {
+    for (path, metadata, buffer) in buffers_receiver {
         eprintln!("{}", path.display());
 
         let mut header = Header::new_gnu();
-        header.set_path(path)?;
-        header.set_size(buffer.len() as u64);
-        header.set_cksum();
-
-        builder.append(&header, &*buffer).unwrap();
+        header.set_metadata(&metadata);
+        builder.append_data(&mut header, path, &*buffer).unwrap();
     }
 
     let encoder = builder.into_inner()?;
