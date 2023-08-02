@@ -4,7 +4,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::thread::spawn;
 
-use clap::{crate_authors, crate_name, crate_version, Arg, Command};
+use clap::{command, value_parser, Arg};
 use crossbeam_channel::{bounded, Sender};
 use glob::glob;
 use rayon::{
@@ -15,36 +15,46 @@ use tar::{Builder, Header};
 use zstd::Encoder;
 
 fn main() -> Fallible {
-    let matches = Command::new(crate_name!())
-        .version(crate_version!())
-        .author(crate_authors!(", "))
-        .arg(Arg::new("OUTPUT").required(true))
-        .arg(Arg::new("INPUTS").required(true).multiple_values(true))
-        .arg(Arg::new("JOBS").short('j').long("jobs").default_value("1"))
+    let matches = command!()
+        .arg(
+            Arg::new("OUTPUT")
+                .required(true)
+                .value_parser(value_parser!(PathBuf)),
+        )
+        .arg(Arg::new("INPUTS").required(true).num_args(1..))
+        .arg(
+            Arg::new("JOBS")
+                .short('j')
+                .long("jobs")
+                .default_value("1")
+                .value_parser(value_parser!(usize)),
+        )
         .arg(
             Arg::new("LEVEL")
                 .short('l')
                 .long("level")
-                .default_value("0"),
+                .default_value("0")
+                .value_parser(value_parser!(i32)),
         )
         .arg(
             Arg::new("WORKERS")
                 .short('w')
                 .long("workers")
-                .default_value("1"),
+                .default_value("1")
+                .value_parser(value_parser!(u32)),
         )
         .get_matches();
 
-    let output = matches.value_of("OUTPUT").unwrap();
+    let output = matches.get_one::<PathBuf>("OUTPUT").unwrap();
     let inputs = matches
-        .values_of("INPUTS")
+        .get_many::<String>("INPUTS")
         .unwrap()
         .map(|inputs| inputs.to_owned())
         .collect::<Vec<_>>();
 
-    let jobs = matches.value_of("JOBS").unwrap().parse::<usize>()?;
-    let level = matches.value_of("LEVEL").unwrap().parse::<i32>()?;
-    let workers = matches.value_of("WORKERS").unwrap().parse::<u32>()?;
+    let jobs = *matches.get_one::<usize>("JOBS").unwrap();
+    let level = *matches.get_one::<i32>("LEVEL").unwrap();
+    let workers = *matches.get_one::<u32>("WORKERS").unwrap();
 
     ThreadPoolBuilder::new().num_threads(jobs).build_global()?;
 
